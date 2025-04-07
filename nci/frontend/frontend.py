@@ -1,7 +1,9 @@
+from PIL import Image
 import streamlit as st
 import pandas as pd
 import requests
-
+import base64
+import io
 
 def handle_nans(df: pd.DataFrame) -> pd.DataFrame:
   for col in df.columns:
@@ -37,8 +39,6 @@ if uploaded_file:
       "filename": uploaded_file.name,
       "dataframe": df.to_dict(orient="records")
     }
-    print(json_data)
-    print(uploaded_file.name)
     response = requests.post(f"{API_BASE}/upload-to-gadi", json=json_data)
 
     if response.status_code == 200:
@@ -64,3 +64,23 @@ if st.button("Submit Job"):
     else:
       st.error("Failed to submit job.")
       st.json(response.json())
+
+
+
+# Fetch and Plot Section
+st.header("📊 View Processed Results and Plot")
+filename_input = st.text_input("Enter result filename (e.g. `myfile.csv`)")
+if st.button("Fetch and Plot Result"):
+	if filename_input:
+		resp = requests.get(f"{API_BASE}/get-result-and-plot", params={"filename": filename_input})
+		data = resp.json()
+		if "plot_image_base64" in data:
+			st.success(data["message"])
+			df_result = pd.DataFrame(data["data"])
+			st.dataframe(df_result)
+			img_data = base64.b64decode(data["plot_image_base64"])
+			image = Image.open(io.BytesIO(img_data))
+			st.image(image, caption="📈 Simulation Output")
+		else:
+			st.error("❌ Failed to load result.")
+			st.json(data)

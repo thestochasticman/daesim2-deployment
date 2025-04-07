@@ -10,6 +10,12 @@ import pandas as pd
 import paramiko
 import os
 import time
+import io
+from matplotlib import pyplot as plt
+import base64
+import matplotlib
+
+matplotlib.use('Agg')
 
 
 c: Credentials = Credentials.__from_json__('nci/configs/credentials.json')
@@ -17,47 +23,54 @@ dg: DirsGadi = DirsGadi.__from_json__('nci/configs/dirs_gadi.json')
 ssh = create_ssh_client(c, dg)
 app = FastAPI()
 
-# def submit_pbs_job(filename: str) -> str:
-# 	script = f"""#!/bin/bash
-# #PBS -l walltime=00:10:00,ncpus=1,mem=2GB
-# #PBS -N job_{filename}
-# #PBS -o {GADI_OUTPUT_DIR}/{filename}.out
-# #PBS -e {GADI_OUTPUT_DIR}/{filename}.err
-
-# cd {GADI_OUTPUT_DIR}
-# module load python3
-# python3 run_daesim.py {GADI_INPUT_DIR}/{filename} {GADI_OUTPUT_DIR}/{os.path.splitext(filename)[0]}_result.csv
-# """
-
-# 	jobfile = f"/tmp/job_{filename}.sh"
-# 	with open(jobfile, "w") as f:
-# 		f.write(script)
-
-# 	remote_jobfile = f"{GADI_INPUT_DIR}/job_{filename}.sh"
-
-# 	ssh = paramiko.SSHClient()
-# 	ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-# 	ssh.connect(GADI_HOST, username=GADI_USERNAME, key_filename=GADI_KEY_PATH)
-
-# 	sftp = ssh.open_sftp()
-# 	sftp.put(jobfile, remote_jobfile)
-# 	sftp.close()
-
-# 	stdin, stdout, stderr = ssh.exec_command(f"qsub {remote_jobfile}")
-# 	job_output = stdout.read().decode().strip()
-# 	ssh.close()
-
-# 	return job_output
-
 # ---- Endpoints ----
 @app.post("/upload-to-gadi")
 def upload_file(data: DataInput):
-	print(data)
 	df = pd.DataFrame(data.dataframe)
 	df = handle_nans(df)
 	remote_path = upload_to_gadi(ssh, dg, df, data.filename)
 	return {"message": f"Uploaded {data.filename} to Gadi at {remote_path}"}
 
+def generate_plot_base64(df: pd.DataFrame, x_col: str, y_col: str) -> str:
+	fig, ax = plt.subplots()
+	ax.plot(df[x_col], df[y_col], marker='o')
+	ax.set_xlabel(x_col)
+	ax.set_ylabel(y_col)
+	ax.set_title(f'{y_col} vs {x_col}')
+	ax.grid(True)
+	buf = io.BytesIO()
+	plt.savefig(buf, format='png')
+	plt.close(fig)
+	buf.seek(0)
+	return base64.b64encode(buf.read()).decode("utf-8")
+
+@app.get("/get-result-and-plot")
+def get_result_and_plot(filename: str):
+	job_name = os.path.splitext(filename)[0]
+	remote_result = os.path.join(dg.output, f"{job_name}_result.csv")
+	local_result = f"/tmp/{job_name}_result.csv"
+
+	ssh = create_ssh_client(c, dg)
+	sftp = ssh.open_sftp()
+	try:
+		sftp.get(remote_result, local_result)
+	except FileNotFoundError:
+		sftp.close()
+		ssh.close()
+		return {"error": f"Output file not found for {filename}"}
+
+	sftp.close()
+	df = pd.read_csv(local_result)
+	cols = df.columns.tolist()
+	if len(cols) < 2:
+		return {"error": "Not enough columns to plot."}
+
+	plot_base64 = generate_plot_base64(df, cols[0], cols[5])
+	return {
+		"message": f"✅ Loaded result for {filename}",
+		"plot_image_base64": plot_base64,
+		"data": df.to_dict(orient="records")
+	}
 # @app.post("/submit-job")
 # def submit_job(request: JobRequest):
 # 	job_id = submit_pbs_job(request.filename)
