@@ -11,8 +11,8 @@ import uuid
 USER = 'ya6227'
 HOST = 'gadi.nci.org.au'
 KEY_PATH = '/Users/yasar/.ssh/id_rsa'
-DATA_DIR = '/g/data/xe2/ya6227/daesim2-analysis/DAESIM_data/DAESim_forcing_data'
-
+DATA_DIR = '/g/data/xe2/ya6227/daesim2-analysis/DAESIM_data/DAESIM_jobs'
+ 
 app = FastAPI()
 
 class DataInput(BaseModel):
